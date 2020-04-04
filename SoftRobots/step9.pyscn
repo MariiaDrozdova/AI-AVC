@@ -1,0 +1,242 @@
+# -*- coding: utf-8 -*-
+"""
+Step 8: Adding the rigidification to the tutorial.
+"""
+import Sofa
+from splib.constants import Key
+from stlib.scene import Scene, ContactHeader
+from tripod import Tripod
+from tripodcontroller import DirectController, InverseController, GoalController
+from splib.numerics import sin, cos, to_radians, Quat
+from tutorial import *
+import time
+import re
+import os
+#import numpy as np
+
+def EffectorGoal(node, position):
+    goal = node.createChild('goal')
+    goal.createObject('EulerImplicitSolver', firstOrder=True)
+    goal.createObject('CGLinearSolver', iterations=100, threshold=1e-5, tolerance=1e-5)
+    goal.createObject('MechanicalObject', name='goalMO', template='Rigid3d',
+                      position=position+[0., 0., 0., 1.], showObject=True, showObjectScale=10)
+    goal.createObject('RestShapeSpringsForceField', angularStiffness=100, stiffness=100)
+
+    #spheres = goal.createChild('spheres')
+    #spheres.createObject('MechanicalObject', name='mo', position='0 0 0  10 0 0   0 10 0   0 0 10')
+    #spheres.createObject('Sphere', radius=5, group=1)
+    #spheres.createObject('RigidMapping')
+    goal.createObject('UncoupledConstraintCorrection', compliance='1e-10  1e-10  0 0 1e-10  0 1e-10 ')
+    return goal
+
+
+
+class GoalController(Sofa.PythonScriptController):
+    """This controller moves the goal position when the inverse control is activated
+    """
+
+    def __init__(self, goalNode, rotationControl='0'):
+        self.name = "GoalController"
+        self.activated = False
+        self.time = 0
+        self.dy = 0.1
+        self.mo = goalNode.goalMO
+
+        self.theta_x = 0;
+        self.theta_z = 0;
+        self.dy=0;
+        self.theta_xs = []
+        self.theta_zs = []
+        self.times = []
+        self.time0 = 0
+        self.counter = 0
+        self.flag = False 
+        #change the path to the file containing action - theta_x - theta_z in each line
+        path_to_file = r'C:\Users\Etudient1\Desktop\SOFA_v19.06.99_custom_Win64_v8.1\bin\actions4.txt'
+        if not os.path.exists(path_to_file):
+            print("File is not found : " + str(path_to_file))
+            return
+        with open(path_to_file, 'r') as f:
+            for line in f:
+                t, _, theta_x, _, theta_z, _ = (re.split(' |\n|\t||', line))  
+                self.times.append(float(t))
+                self.theta_xs.append(float(theta_x))
+                self.theta_zs.append(float(theta_z))
+        
+        
+    def next_operation(self, dt):
+        if self.counter >= len(self.times):
+            self.counter = 0
+            self.time0 = self.time
+        sleeping_time = self.times[self.counter]
+        #time to push a new action
+        if (self.time - self.time0 >= sleeping_time - dt/2 and self.time - self.time0 < sleeping_time + dt/2):
+            theta_x = self.theta_xs[self.counter]
+            theta_z = self.theta_zs[self.counter]
+            self.counter += 1
+            self.theta_x = theta_x
+            self.theta_z = theta_z
+            print('done')
+        return
+    
+    def onKeyPressed(self, key):
+        if key == Key.I:
+            self.activated = True
+
+        if self.activated==0:
+            return
+
+        if key == Key.plus:
+            self.dy = self.dy + 2;
+
+        if key == Key.minus:
+            self.dy = self.dy - 2;           
+
+        if key == Key.uparrow:
+            self.theta_x = self.theta_x-0.1;
+        if key == Key.downarrow:
+            self.theta_x = self.theta_x+0.1;
+
+        if key == Key.leftarrow:
+            self.theta_z = self.theta_z+0.1;
+        if key == Key.rightarrow:
+            self.theta_z = self.theta_z-0.1;  
+        #with open('actions4.txt', 'a+') as f:
+        #    f.write(str(self.time) + '  ' + str(self.theta_x) + '  ' + str(self.theta_z) + '\n' )
+            
+            
+        if key == Key.L:
+            self.flag = not self.flag
+            #remember time when animation started
+            self.time0 = self.time + 0.1 - self.time0
+        print(self.flag)
+
+            
+        
+
+                
+
+
+    def onBeginAnimationStep(self, dt):
+        if self.activated:
+            self.time = self.time+dt
+
+            #if self.time >= 1:
+            #    self.time = 0;
+            #    self.dy = -self.dy
+
+            pos = [self.mo.position[0][0], self.mo.position[0][1]+self.dy, self.mo.position[0][2]]
+            self.dy =0;
+            #pos[1] += self.dy
+
+            quat = Quat.createFromEuler([self.theta_x, 0 , self.theta_z]);
+
+
+
+
+
+            self.mo.rest_position = [[pos[0], pos[1], pos[2], quat[0], quat[1], quat[2], quat[3]]]
+                
+            if self.flag:
+               self.next_operation(dt)
+
+                          
+
+
+# Description of how the communication is handled
+# CHANGE HERE the serialport that correspond to your computer
+# def SerialPortBridgeGeneric(rootNode, serialport="/dev/cu.usbserial-1420"):
+# def SerialPortBridgeGeneric(rootNode, serialport="..."):
+# Description of how the communication is handled
+def SerialPortBridgeGeneric(rootNode, serialport="/dev/cu.usbserial-1410"):
+    return rootNode.createObject("SerialPortBridgeGeneric", port=serialport, baudRate=115200, size=3, listening=True, header=255)
+
+
+def createScene(rootNode):
+    # Choose here to control position or orientation of end-effector
+    orientation = True
+    onlyMaze = False
+
+    if orientation:
+        # inverse in orientation
+        goalNode = EffectorGoal(rootNode, [0, 40, 0])
+    else:
+        # inverse in position
+        goalNode = EffectorGoal(rootNode, [0, 40, 0])
+
+    # You can add a GoalController and play with it
+    GoalController(goalNode)
+
+
+
+    # Scene set up
+    scene = Scene(rootNode, gravity=[0.0, -9810, 0.0])
+
+
+    ContactHeader(scene, alarmDistance=4, contactDistance=0.1, frictionCoef=0.0, inverse=1)
+    rootNode.createObject("RequiredPlugin", name="SoftRobots")
+    scene.VisualStyle.displayFlags = "showBehavior showCollisionModels"
+
+
+    sphereNode = rootNode.createChild("sphere")
+    sphereNode.createObject("EulerImplicitSolver")
+    sphereNode.createObject("SparseLDLSolver", name="ldl")
+    sphereNode.createObject("GenericConstraintCorrection", solverName='ldl')
+    sphereNode.createObject("MechanicalObject", template='Vec3', position='22 50 -27')
+    sphereNode.createObject("UniformMass", totalMass='0.001')
+    sphereNode.createObject("Sphere", radius='2', name='0')
+
+
+    mazeNode = goalNode.createChild("maze");
+
+    mazeNode.createObject("MeshSTLLoader", name="loader", filename="../../mesh/maze_12_coarse.stl", translation="0 0 0", rotation="-90 0 0")
+    mazeNode.createObject("Mesh", src='@loader')
+    mazeNode.createObject("MechanicalObject")
+    mazeNode.createObject("Triangle", group=1)
+    mazeNode.createObject("Line", group=1)
+    mazeNode.createObject("Point", group=1)
+    mazeNode.createObject("RigidMapping")
+
+
+
+    if onlyMaze:
+        return
+
+
+
+
+
+    # Serial port bridge
+    serial = SerialPortBridgeGeneric(rootNode)
+
+    # Create the tripod object.
+    tripod = Tripod(rootNode, effectorPos=[0, 30, 0], use_orientation=orientation, goalNode=goalNode)
+
+    actuators = tripod.RigidifiedStructure.RigidParts.actuators
+    invCtr = InverseController(rootNode, goalNode, actuators, actuators, tripod.RigidifiedStructure.RigidParts, tripod, serial, [tripod.ActuatedArm0, tripod.ActuatedArm1, tripod.ActuatedArm2])
+
+    # The regular controller that is being used for the last 2 steps
+    DirectController(rootNode, [tripod.ActuatedArm0,
+                                tripod.ActuatedArm1,
+                                tripod.ActuatedArm2], invCtr)
+
+    simulation = scene.createChild("Simulation")
+    simulation.createObject("EulerImplicitSolver", firstOrder=0, rayleighStiffness='0.01')
+    simulation.createObject("SparseLDLSolver", name="sparseSolver")
+    simulation.createObject("GenericConstraintCorrection", solverName='sparseSolver')
+    simulation.addChild(tripod)
+
+
+
+
+
+
+
+    
+
+    for i in range(3):
+        visual = tripod.RigidifiedStructure.RigidParts.createChild("VisualModel")
+        visual.createObject("MeshSTLLoader", name="loader", filename="../data/mesh/SG90_servoarm.stl")
+        visual.createObject("MeshTopology", src="@loader")
+        visual.createObject("OglModel", color=[0.75, 0.75, 0.75, 0.7], writeZTransparent=True)
+        visual.createObject("RigidMapping", index=i)
